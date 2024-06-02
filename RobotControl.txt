@@ -1,0 +1,612 @@
+// Global constants and 2D array.
+const int MAX_BEADS = 12; // Max amount of beads per tube.
+const float PIXEL_CONST = 1.4; // Distance between the centers of two
+adjacent grid spaces, in cm.
+int grid[10][10] = {{0}}; // 2D array to store the printing grid information.
+
+void readData(int * colourCounter)
+{
+TFileHandle fin;
+bool fileOkay = openReadPC(fin, "pixelGrid.txt");
+
+if(!fileOkay)
+{
+displayString(1, "Error during file reading.");
+while(getButtonPress(buttonAny))
+{}
+}
+else {
+// Reading in the data from the "buttom" (i.e. index 9) of the
+
+output grid
+
+// as that's where the robot starts printing
+for(int row = 9; row >= 0; row--)
+{
+for(int col = 0; col < 10; col++)
+{
+int num = 0;
+readIntPC(fin, num);
+
+28
+grid[row][col] = num;
+
+if(num != -1)
+colourCounter[num]++;
+
+}
+}
+}
+}
+
+// Clears the current display by overwriting existing content with blank
+space.
+void resetDisplay()
+{
+for(int row = 1; row <= 15; row++)
+displayString(row, " ");
+
+}
+
+// Displays debug info about the grid being printed as well as the bead
+status.
+void diagnostic(int * storeColourNum, int * colourCounter, int * position,
+int selectedColour, bool showGrid)
+{
+resetDisplay();
+if(showGrid)
+{
+for(int row = 0; row < 10; row++)
+{
+displayString(row, "%i %i %i %i %i %i %i %i %i %i",
+
+grid[row][0], grid[row][1],
+
+grid[row][2], grid[row][3], grid[row][4], grid[row][5],
+grid[row][6], grid[row][7], grid[row][8], grid[row][9]);
+
+29
+
+}
+}
+else
+{
+displayString(1, "Stored:");
+displayString(2, "Red - %d Green - %d", storeColourNum[0],
+
+storeColourNum[1]);
+
+displayString(3, "Blue - %d Orange - %d", storeColourNum[2],
+
+storeColourNum[3]);
+
+displayString(4, "Yellow - %d Black - %d", storeColourNum[4],
+
+storeColourNum[5]);
+
+displayString(6, "Remaining:");
+displayString(7, "Red - %d Green - %d", colourCounter[0],
+
+colourCounter[1]);
+
+displayString(8, "Blue - %d Orange - %d", colourCounter[2],
+
+colourCounter[3]);
+
+displayString(9, "Yellow - %d Black - %d", colourCounter[4],
+
+colourCounter[5]);
+
+displayString(11, "Position: (%d, %d)", position[0],
+
+position[1]);
+
+displayString(13, "Printing: %d", selectedColour);
+}
+}
+
+// Rotates the colour storage tubes to select a desired colour.
+void colourSelect(int desiredColour, int & selectedColour)
+{
+const int STOR_MOTOR_POWER = 5;
+const int COLOUR_DEG[6] = {0, 60, 120, 180, 240, 300};
+
+30
+
+// Checks if desired color is selected color.
+if (selectedColour != desiredColour)
+{
+int angleDiff = COLOUR_DEG[desiredColour] -
+
+COLOUR_DEG[selectedColour];
+
+int curAngle = nMotorEncoder[motorB];
+
+// Checks if angle difference CW is more than 180 and rotates
+
+appropriate angle CCW if true.
+if (angleDiff >= 180)
+{
+angleDiff = 360 - angleDiff;
+motor[motorB] = -STOR_MOTOR_POWER;
+while (nMotorEncoder[motorB] > curAngle - angleDiff)
+{}
+motor[motorB] = 0;
+}
+// Checks if angle difference CCW is more than 180 and rotates
+
+appropriate angle CW if true.
+
+else if (angleDiff <= -180)
+{
+angleDiff = -360 - angleDiff;
+motor[motorB] = STOR_MOTOR_POWER;
+while (nMotorEncoder[motorB] < curAngle - angleDiff)
+{}
+motor[motorB] = 0;
+}
+// Checks if rotation should be CW and rotates appropriate angle
+
+CW.
+
+else if(angleDiff > 0)
+
+31
+
+{
+motor[motorB] = STOR_MOTOR_POWER;
+while (nMotorEncoder[motorB] < curAngle + angleDiff)
+{}
+motor[motorB] = 0;
+}
+// Checks if rotation is supposed to be CCW and rotates
+
+appropriate angle CCW.
+
+else if (angleDiff < 0)
+{
+motor[motorB] = -STOR_MOTOR_POWER;
+while (nMotorEncoder[motorB] > curAngle + angleDiff)
+{}
+motor[motorB] = 0;
+}
+
+selectedColour = desiredColour;
+}
+}
+
+float dist2Degrees(float distance, float radius)
+{
+return (fabs(distance)/radius)*(180.0/PI);
+}
+
+// Moves the robot back to the origin.
+void recall(){
+const int RECALL_POW = 25;
+
+// Move until the robot reaches x = 9.
+
+32
+motor[motorD] = RECALL_POW;
+while (SensorValue(S1) == 0)
+{}
+motor[motorD] = 0;
+nMotorEncoder[motorD] = 0;
+
+// Move until the robot reaches y = 0.
+motor[motorA] = RECALL_POW;
+while (SensorValue(S2) == 0)
+{}
+motor[motorA] = 0;
+
+// Move the robot to x = 0.
+motor[motorD] = -RECALL_POW;
+while(abs(nMotorEncoder[motorD]) < dist2Degrees(9*PIXEL_CONST, 1.5))
+{}
+motor[motorD] = 0;
+
+nMotorEncoder[motorA] = nMotorEncoder[motorD] = 0;
+}
+
+/* Prompts the user to reload a number of each bead colour as needed, based
+on max storage and remaining amount. Uses arrays to keep track of how many of
+each colour
+need to still be loaded & how many beads are in each tube */
+void colourLoad(int * storeColourNum, int * colourCounter, int &
+selectedColour)
+{
+if(selectedColour != 0)
+{
+
+33
+colourSelect(0, selectedColour);
+}
+
+// Variable used to select next colour to be loaded, index in the for
+loop can't be used as
+// the colourSelect function uses pass by reference.
+int tempSelect = 0;
+
+// Prompts user to load each colour as needed.
+for (int index = 0; index < 6; index++)
+{
+resetDisplay();
+// Rotates tube "index + 1" to be over the dispensing hole, as to
+
+make tube "index"
+
+// more accessible for loading.
+if (index < 5)
+colourSelect(index + 1, tempSelect);
+else
+colourSelect(0, tempSelect);
+
+// Only tells the user to reload colours that are necessary.
+if(colourCounter[index] != 0 && colourCounter[index] >
+
+storeColourNum[index])
+
+{
+// If the number of beads needed is less than the maximum
+
+load amount (i.e. 12 - currently loaded)
+
+// then load in all needed beads.
+if (colourCounter[index] < MAX_BEADS -
+
+storeColourNum[index])
+{
+displayString(1, "Insert %d of colour %d. ",
+
+colourCounter[index], index);
+
+34
+
+storeColourNum[index] += colourCounter[index]; //
+
+Keeps track of how many beads are in the tubes.
+
+}
+// If there's more beads remaining than the max amount we
+
+can load in, load until we reach capacitiy.
+
+else
+{
+displayString(1, "Insert %d of colour %d. ",
+
+MAX_BEADS - storeColourNum[index], index);
+
+storeColourNum[index] = MAX_BEADS;
+}
+displayString(3, "Press any button when loading
+
+complete.");
+
+/* Terminates the program if there is no user input after 5
+
+minutes of inactivity.
+
+NOTE: this is an abnormal shutdown procedure, and the use
+
+of stopAllTasks was determined to be
+
+the best course of action after discussion with the
+
+teaching team. This is because this event can
+
+occur in the middle of a printing process, meaning the
+
+other option to terminate the program early
+
+would be to have a boolean which every function checks
+
+before executing their own duties, adding in
+
+unnecessary complexity to the program. */
+time1[T1] = 0;
+while (!getButtonPress(buttonAny))
+{
+if (time1[T1] > 5 * 60 * 1000)
+{
+resetDisplay();
+displayBigTextLine(1, "Terminating print.");
+
+35
+recall();
+stopAllTasks();
+}
+}
+while (getButtonPress(buttonAny))
+{}
+}
+}
+}
+
+// Moves the robot a certain amount in the x and y directions
+void moveXY(int xPosition, int yPosition, int * position) // Assuming x dist
+is the small wheel and y dist is the big outer wheel
+{
+float xDist = xPosition * PIXEL_CONST;
+float yDist = yPosition * PIXEL_CONST;
+const int MOTOR_POWER = 20;
+const int SMALL_WHEEL = 1.5; // Diameters of the wheels.
+const int LARGE_WHEEL = 2.75;
+float initialEncValueD = nMotorEncoder[motorD];
+
+// Calculates and executes movement distance.
+if(xDist > 0)
+{
+motor[motorD] = MOTOR_POWER;
+while (nMotorEncoder[motorD] <= (initialEncValueD +
+
+dist2Degrees(xDist, SMALL_WHEEL)))
+
+{}
+motor[motorD] = 0;
+}
+
+36
+
+else if(xDist < 0)
+{
+motor[motorD] = -MOTOR_POWER;
+while (nMotorEncoder[motorD] >= initialEncValueD -
+
+dist2Degrees(xDist, SMALL_WHEEL))
+
+{}
+motor[motorD] = 0;
+}
+
+wait1Msec(500);
+float initialEncValueA = nMotorEncoder[motorA];
+
+if(yDist > 0)
+{
+motor[motorA] = -MOTOR_POWER;
+while (nMotorEncoder[motorA] >= initialEncValueA -
+
+dist2Degrees(yDist, LARGE_WHEEL))
+
+{}
+motor[motorA] = 0;
+}
+else if(yDist < 0)
+{
+motor[motorA] = MOTOR_POWER;
+while (nMotorEncoder[motorA] <= initialEncValueA +
+
+dist2Degrees(yDist, LARGE_WHEEL))
+
+{}
+motor[motorA] = 0;
+}
+
+// Updating position array.
+position[0] += xPosition;
+
+37
+
+position[1] += yPosition;
+}
+
+// Checks if any of the storage tubes are empty and there is still more of
+that colour.
+bool checkStorage(int * storeColourNum, int * colourCounter)
+{
+for(int index = 0; index < 6; index++)
+{
+if(storeColourNum[index] == 0 && colourCounter[index] != 0)
+return true;
+
+}
+return false;
+}
+
+// Drops a bead into the grid.
+void drop1Pixel(int * storeColourNum, int * colourCounter, int colour, bool &
+showGrid)
+{
+const int DISP_MOTOR_POWER = 25;
+const int DISP_ANGLE = 95;
+nMotorEncoder[motorC] = 0;
+
+// Go to open position (storage tubes and dispensing chamber lined up).
+motor[motorC] = -DISP_MOTOR_POWER;
+while (nMotorEncoder[motorC] > -DISP_ANGLE)
+{}
+motor[motorC] = 0;
+
+// Wait a bit to let bead drop.
+
+38
+
+wait1Msec(500);
+
+// Go back to closed position (storage tubes and dispensing chamber not
+lined up).
+motor[motorC] = DISP_MOTOR_POWER;
+while (nMotorEncoder[motorC] < 0)
+{}
+motor[motorC] = 0;
+
+// Update array keeping track of the number of beads in storage, and
+beads remaining to be printed.
+storeColourNum[colour]--;
+colourCounter[colour]--;
+
+// Changes the diagnostic display settings every 5 seconds, but only
+refreshes with every bead dispense.
+if(time1[T2] > 5 * 1000)
+{
+time1[T2] = 0;
+showGrid = !showGrid;
+}
+}
+
+// Prints the entire drawing by calling on all preceeding functions.
+void printGrid(int * storeColourNum, int * colourCounter, int &
+selectedColour, int * position, bool & showGrid)
+{
+colourLoad(storeColourNum, colourCounter, selectedColour);
+diagnostic(storeColourNum, colourCounter, position, selectedColour,
+showGrid);
+bool rightSide = false; // Keeps track of which side the printer head
+is on.
+
+39
+
+const int moveWait = 600; // Waiting between movements to reduce
+inaccuracies induced by printing head swinging.
+time1[T2] = 0; // For updating the diagnostic display settings.
+
+// Prints each row
+for (int rowIndex = 0; rowIndex < 10; rowIndex++)
+{
+
+// Prints each color in a row
+for (int colourIndex = 0; colourIndex < 6; colourIndex++)
+{
+// Searches across the row either left to right or vise
+
+versa, depending on current position.
+int nextIndex = 0;
+int curIndex = 0;
+int increment = 1;
+bool noColour = true;
+
+if (rightSide == true)
+{
+nextIndex = 9;
+curIndex = 9;
+increment = -1;
+}
+
+// Drops a pixel at every index of the current row which
+
+contains the current colour.
+
+while (nextIndex != -1 && nextIndex != 10)
+{
+if(grid[rowIndex][nextIndex] == colourIndex)
+{
+
+40
+noColour = false;
+colourSelect(colourIndex, selectedColour); //
+
+Only changes colour if needed.
+
+// Moves to the destination one step at a time.
+for (int count = 0; count < abs(nextIndex -
+
+curIndex); count++)
+
+{
+if ((nextIndex - curIndex) > 0)
+{
+moveXY(1, 0, position);
+}
+else
+{
+moveXY(-1, 0, position);
+}
+}
+drop1Pixel(storeColourNum, colourCounter,
+
+colourIndex, showGrid);
+
+diagnostic(storeColourNum, colourCounter,
+
+position, selectedColour, showGrid); // Updating diagnostic
+
+// Checks if anything needs to be loaded after
+
+each bead drop.
+
+if(checkStorage(storeColourNum, colourCounter)
+
+== true)
+
+colourLoad(storeColourNum, colourCounter,
+
+selectedColour);
+
+curIndex = nextIndex;
+}
+
+41
+
+nextIndex += increment; // Checks the next index in
+
+this row.
+
+}
+
+// Only moves across to the other side of the grid if it
+
+has printed anything. If not, move on to checking next colour.
+
+if(!noColour)
+{
+if (rightSide == false)
+{
+// Moves printer head to right side of row.
+for (int count = 0; count<(9 - curIndex);
+
+count++)
+
+{
+moveXY(1, 0, position);
+wait1Msec(moveWait);
+}
+
+rightSide = true;
+
+}
+else
+{
+// Moves printer head to left side of row.
+for (int count = 0; count < abs(0 - curIndex);
+
+count++)
+
+{
+moveXY(-1, 0, position);
+wait1Msec(moveWait);
+}
+rightSide = false;
+
+42
+
+}
+}
+}
+
+// Moves up a row.
+moveXY(0, 1, position);
+}
+
+// Goes back to origin after finished printing.
+recall();
+}
+
+task main()
+{
+// Data arrays and variables.
+int colourCounter[6] = {0, 0, 0, 0, 0, 0};
+int storedColourNum[6] = {0, 0, 0, 0, 0, 0};
+int position[2] = {0, 0};
+int selectedColour = 0;
+bool showGrid = false;
+
+SensorType[S1] = sensorEV3_Touch;
+SensorType[S2] = sensorEV3_Touch;
+time1[T1] = 0;
+
+// Printing process
+readData(colourCounter);
+printGrid(storedColourNum, colourCounter, selectedColour, position,
+showGrid);
+}
